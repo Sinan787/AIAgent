@@ -1,10 +1,15 @@
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+from tools import search_tool, wiki_tool, save_tool
 
 load_dotenv()
 
+#Format for the output of the agent
 
 class ResponseModel(BaseModel):
     topic: str
@@ -13,4 +18,30 @@ class ResponseModel(BaseModel):
     tools_used: list[str]
 
 llm = ChatOpenAI(model="gpt-4o-mini")
-output_parser = PydanticOutputParser(pydantic_object=ResponseModel)
+parser = PydanticOutputParser(pydantic_object=ResponseModel)
+
+#System prompt for the agent
+
+prompt = ChatPromptTemplate.from_messages( # type: ignore
+    [
+        (
+            "system",
+            """
+            You are a research assistant that will help generate a research paper.
+            Answer the user query and use neccessary tools. 
+            Wrap the output in this format and provide no other text\n{format_instructions}
+            """,
+        ),
+        ("placeholder", "{chat_history}"),
+        ("human", "{query}"),
+        ("placeholder", "{agent_scratchpad}"),
+    ]
+).partial(format_instructions=parser.get_format_instructions())
+
+
+agent = create_tool_calling_agent(llm=llm, tools=[search_tool, wiki_tool, save_tool], prompt=prompt)
+
+agent_executor = AgentExecutor(agent=agent, tools=[search_tool, wiki_tool, save_tool], verbose=True)  
+
+raw_response = agent_executor.invoke({})
+
